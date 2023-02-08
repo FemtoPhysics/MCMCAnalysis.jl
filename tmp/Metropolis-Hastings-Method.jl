@@ -2,23 +2,36 @@ import CairoMakie
 
 const FIG = CairoMakie.Figure();
 
-normal_dist(x::Real, μ::Real)          = normal_dist(x, μ, 1.0)
-normal_dist(x::Real, μ::Real, σ::Real) = exp(-0.5 * abs2((x - μ) / σ)) / (σ * 2.5066282746310002)
+log_normal_dist(x::Real, μ::Real)          = -0.5 * abs2(x - μ) - 0.9189385332046727
+log_normal_dist(x::Real, μ::Real, σ::Real) = -0.5 * abs2((x - μ) / σ) - log(σ) - 0.9189385332046727
 
 target_1(x::Real) = ifelse(x < 0, 0.0, exp(-1.3 * x))
+log_target_1(x::Real) = ifelse(x < 0, -Inf, -1.3 * x)
 
-function demo!(fig::CairoMakie.Makie.Figure, target::Function, N::Int, init_range::Tuple{S,T}; xlims::Tuple{<:Real, <:Real}=(0.0, 6.0)) where {S<:Real, T<:Real}
+function demo!(fig::CairoMakie.Makie.Figure, target::Function, log_target::Function, N::Int, init_range::Tuple{S,T}; burn_in_num::Int=50, xlims::Tuple{<:Real, <:Real}=(0.0, 6.0)) where {S<:Real, T<:Real}
     lb, rb = min(init_range...), max(init_range...)
     chain = Vector{promote_type(S,T)}(undef, N)
-    @inbounds chain[1] = lb + rand() * (rb - lb)
 
+    # Burn-in discarding
+    this_state = lb + rand() * (rb - lb)
+    test_state = zero(promote_type(S,T))
+    for t in 1:burn_in_num
+        test_state = this_state + 1.0 * randn()
+        this_log_target_value = log_target(this_state)
+        test_log_target_value = log_target(test_state)
+        log_Hastings_ratio = log_normal_dist(this_state, test_state) - log_normal_dist(test_state, this_state)
+        accept_probility = exp(log_Hastings_ratio + test_log_target_value - this_log_target_value)
+        this_state = ifelse(rand() > accept_probility, this_state, test_state)
+    end
+
+    @inbounds chain[1] = this_state
     for t in 2:N
         this_state = @inbounds chain[t - 1]
         test_state = this_state + 1.0 * randn()
-        this_target_value = target(this_state)
-        test_target_value = target(test_state)
-        Hastings_ratio = normal_dist(this_state, test_state) / normal_dist(test_state, this_state)
-        accept_probility = Hastings_ratio * test_target_value / this_target_value
+        this_log_target_value = log_target(this_state)
+        test_log_target_value = log_target(test_state)
+        log_Hastings_ratio = log_normal_dist(this_state, test_state) - log_normal_dist(test_state, this_state)
+        accept_probility = exp(log_Hastings_ratio + test_log_target_value - this_log_target_value)
         @inbounds chain[t] = ifelse(rand() > accept_probility, this_state, test_state)
     end
 
@@ -35,5 +48,4 @@ function demo!(fig::CairoMakie.Makie.Figure, target::Function, N::Int, init_rang
     return fig
 end
 
-demo!(FIG, target_1, 5000, (0.1, 2.0))
-
+demo!(FIG, target_1, log_target_1, 5000, (0.1, 2.0))
