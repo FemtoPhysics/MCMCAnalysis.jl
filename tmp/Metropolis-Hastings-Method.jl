@@ -1,6 +1,6 @@
 import CairoMakie
 
-const FIG = CairoMakie.Figure();
+const FIG = CairoMakie.Figure()
 
 log_normal_dist(x::Real, μ::Real)          = -0.5 * abs2(x - μ) - 0.9189385332046727
 log_normal_dist(x::Real, μ::Real, σ::Real) = -0.5 * abs2((x - μ) / σ) - log(σ) - 0.9189385332046727
@@ -8,7 +8,10 @@ log_normal_dist(x::Real, μ::Real, σ::Real) = -0.5 * abs2((x - μ) / σ) - log(
 target_1(x::Real) = ifelse(x < 0, 0.0, exp(-1.3 * x))
 log_target_1(x::Real) = ifelse(x < 0, -Inf, -1.3 * x)
 
-function demo!(fig::CairoMakie.Makie.Figure, target::Function, log_target::Function, N::Int, init_range::Tuple{S,T}; burn_in_num::Int=50, xlims::Tuple{<:Real, <:Real}=(0.0, 6.0)) where {S<:Real, T<:Real}
+function demo!(
+        fig::CairoMakie.Makie.Figure, target::Function, log_target::Function, N::Int, init_range::Tuple{S,T};
+        burn_in_num::Int=50, xlims::Tuple{<:Real, <:Real}=(0.0, 6.0)
+    ) where {S<:Real, T<:Real}
     lb, rb = min(init_range...), max(init_range...)
     chain = Vector{promote_type(S,T)}(undef, N)
 
@@ -43,7 +46,8 @@ function demo!(fig::CairoMakie.Makie.Figure, target::Function, log_target::Funct
 
     CairoMakie.empty!(fig)
     axis = @inbounds CairoMakie.Axis(fig[1,1])
-    CairoMakie.hist!(axis, chain; bins=50, normalization=:pdf, color=(:gray, 0.5), strokewidth=0.5)
+    CairoMakie.hist!(axis, chain;
+                     bins=50, normalization=:pdf, color=(:gray, 0.5), strokewidth=0.5)
     CairoMakie.lines!(axis, ref_x, ref_y)
     return fig
 end
