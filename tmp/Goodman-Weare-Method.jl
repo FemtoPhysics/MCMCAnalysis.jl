@@ -1,20 +1,18 @@
 import CairoMakie
+import MCMCAnalysis: sampling, stretch_move!, log_accept_probability
 
 const VecI = AbstractVector
 
 const FIG = CairoMakie.Figure()
 
-target_1(x::Real) = ifelse(x < 0, 0.0, exp(-1.3 * x))
+target_1(x::Real) = ifelse(x < 0, 0.0, 1.3 * exp(-1.3 * x))
 
-log_target_1(x::VecI{T}) where T<:Real = @inbounds ifelse(x[1] < 0, -Inf, -1.3 * x[1])
-
-gsampling(a::Real)          = gsampling(a, rand())
-gsampling(a::Real, u::Real) = a * u * u - 2 * u * (u - 1) + abs2(u - 1) / a
+log_target_1(x::VecI{T}) where T<:Real = @inbounds ifelse(x[1] < 0, -Inf, 1.3 * (1 - x[1]))
 
 function demo_gsampling(; a::Real=2.0)
     sampling_z = Vector{Float64}(undef, 10000)
     for i in eachindex(sampling_z)
-        @inbounds sampling_z[i] = gsampling(a)
+        @inbounds sampling_z[i] = sampling(a)
     end
 
     fig = CairoMakie.Figure()
@@ -35,54 +33,40 @@ function demo!(
     # axes(chain, 2) := number of walkers, dims = K
     # axes(chain, 3) := series of epochs, dims = N
     chain = Array{promote_type(S,T), 3}(undef, n, K, N)
+    one2n = eachindex(1:n)
+    one2K = eachindex(1:K)
+
+    # Initialization
+    for k in axes(chain, 2), i in axes(chain, 1)
+        @inbounds chain[i,k,1] = lb + rand() * (rb - lb)
+    end
 
     # Burn-in discarding
-    this_state = view(chain, :, :, 1)
-    for k in axes(this_state, 2), i in axes(this_state, 1)
-        @inbounds this_state[i,k] = lb + rand() * (rb - lb)
-    end
-    let test_state = view(chain, :, :, 2)
-        for _ in 1:burn_in_num
-            for k in 1:K
-                j = rand(1:K)
-                while j ≡ K
-                    j = rand(1:K)
-                end
-                z = gsampling(a)
-                for i in 1:n
-                    @inbounds test_state[i,k] = this_state[i,j] + z * (this_state[i,k] - this_state[i,j])
-                end
-                this_log_target_value = log_target(view(this_state, :, k))
-                test_log_target_value = log_target(view(test_state, :, k))
-                log_accept_probility  = (n-1) * log(1) + test_log_target_value - this_log_target_value
-                if log(rand()) < log_accept_probility
-                    for i in 1:n
-                        @inbounds this_state[i,k] = test_state[i,k]
-                    end
-                end
+    for _ in 1:burn_in_num
+        for k in one2K
+            walker_old = view(chain, :, k, 1)
+            walker_new = view(chain, :, k, 2)
+            j = sampling(one2K, k)
+            z = stretch_move!(walker_new, walker_old, view(chain, :, j, 1), a)
+            q = log_accept_probability(log_target, walker_new, walker_old, n, z)
+
+            if log(rand()) < q
+                copyto!(walker_old, walker_new)
             end
         end
     end
 
     for t in 2:N
-        prev_state = view(chain, :, :, t-1)
-        this_state = view(chain, :, :, t)
-        for k in 1:K
-            j = rand(1:K)
-            while j ≡ K
-                j = rand(1:K)
-            end
-            z = gsampling(a)
-            for i in 1:n
-                @inbounds this_state[i,k] = prev_state[i,j] + z * (prev_state[i,k] - prev_state[i,j])
-            end
-            prev_log_target_value = log_target(view(prev_state, :, k))
-            this_log_target_value = log_target(view(this_state, :, k))
-            log_accept_probility  = (n - 1) * log(1) + this_log_target_value - prev_log_target_value
-            if log(rand()) > log_accept_probility
-                for i in 1:n
-                    @inbounds this_state[i,k] = prev_state[i,k]
-                end
+        tm1 = t - 1
+        for k in one2K
+            walker_old = view(chain, :, k, tm1)
+            walker_new = view(chain, :, k, t)
+            j = sampling(one2K, k)
+            z = stretch_move!(walker_new, walker_old, view(chain, :, j, tm1), a)
+            q = log_accept_probability(log_target, walker_new, walker_old, n, z)
+
+            if log(rand()) > q
+                copyto!(walker_new, walker_old)
             end
         end
     end
@@ -96,10 +80,11 @@ function demo!(
     CairoMakie.empty!(fig)
     axis = @inbounds CairoMakie.Axis(fig[1,1])
     CairoMakie.hist!(axis, view(view(chain, 1, :, :), :);
-                     bins=50, normalization=:pdf, color=(:gray, 0.5), strokewidth=0.5)
-    CairoMakie.lines!(axis, ref_x, ref_y)
+                     bins=100, normalization=:pdf, color=(:gray, 0.3), strokewidth=0.5)
+    CairoMakie.lines!(axis, ref_x, ref_y, linewidth=3.0)
     return fig
 end
 
 demo_gsampling()
-demo!(FIG, target_1, log_target_1, (0.1, 2.0); N=100, K=20, a=2.0, burn_in_num=100)
+demo!(FIG, target_1, log_target_1, (0.1, 2.0);
+      N=200, K=32, a=2.0, burn_in_num=100, xlims=(0.0, 6.0))

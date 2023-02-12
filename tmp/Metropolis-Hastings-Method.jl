@@ -5,8 +5,8 @@ const FIG = CairoMakie.Figure()
 log_normal_dist(x::Real, μ::Real)          = -0.5 * abs2(x - μ) - 0.9189385332046727
 log_normal_dist(x::Real, μ::Real, σ::Real) = -0.5 * abs2((x - μ) / σ) - log(σ) - 0.9189385332046727
 
-target_1(x::Real) = ifelse(x < 0, 0.0, exp(-1.3 * x))
-log_target_1(x::Real) = ifelse(x < 0, -Inf, -1.3 * x)
+target_1(x::Real) = ifelse(x < 0, 0.0, 1.3 * exp(-1.3 * x))
+log_target_1(x::Real) = ifelse(x < 0, -Inf, 1.3 * (1 - x))
 
 function demo!(
         fig::CairoMakie.Makie.Figure, target::Function, log_target::Function, N::Int, init_range::Tuple{S,T};
