@@ -1,5 +1,6 @@
 import CairoMakie
-import MCMCAnalysis: sampling, stretch_move!, log_accept_probability
+import MCMCAnalysis: sampling, BurnInStrategy, MCMCSampler
+import MCMCAnalysis: burn_in_init!, regular_init!, evolve!
 
 const VecI = AbstractVector
 
@@ -27,49 +28,16 @@ function demo!(
         n::Int=1, N::Int=50, K::Int=20, a::Real=2.0, burn_in_num::Int=50, xlims::Tuple{<:Real, <:Real}=(0.0, 6.0)
     ) where {S<:Real, T<:Real}
     N < 2 && error("num. of epoch ($N) should be at least 2")
-    lb, rb = min(init_range...), max(init_range...)
-    # chain of walkers:
-    # axes(chain, 1) := walker's parameters, dims = n
-    # axes(chain, 2) := number of walkers, dims = K
-    # axes(chain, 3) := series of epochs, dims = N
-    chain = Array{promote_type(S,T), 3}(undef, n, K, N)
-    one2n = eachindex(1:n)
+
+    lb, ub = (min(init_range...),), (max(init_range...),)
+    sampler = MCMCSampler(BurnInStrategy(N, burn_in_num, a), n, K)
     one2K = eachindex(1:K)
 
-    # Initialization
-    for k in axes(chain, 2), i in axes(chain, 1)
-        @inbounds chain[i,k,1] = lb + rand() * (rb - lb)
-    end
+    burn_in_init!(sampler, lb, ub)
+    evolve!(sampler.burn_in_sampler, log_target, a)
 
-    # Burn-in discarding
-    for _ in 1:burn_in_num
-        for k in one2K
-            walker_old = view(chain, :, k, 1)
-            walker_new = view(chain, :, k, 2)
-            j = sampling(one2K, k)
-            z = stretch_move!(walker_new, walker_old, view(chain, :, j, 1), a)
-            q = log_accept_probability(log_target, walker_new, walker_old, n, z)
-
-            if log(rand()) < q
-                copyto!(walker_old, walker_new)
-            end
-        end
-    end
-
-    for t in 2:N
-        tm1 = t - 1
-        for k in one2K
-            walker_old = view(chain, :, k, tm1)
-            walker_new = view(chain, :, k, t)
-            j = sampling(one2K, k)
-            z = stretch_move!(walker_new, walker_old, view(chain, :, j, tm1), a)
-            q = log_accept_probability(log_target, walker_new, walker_old, n, z)
-
-            if log(rand()) > q
-                copyto!(walker_new, walker_old)
-            end
-        end
-    end
+    regular_init!(sampler, log_target, n, one2K, lb, ub)
+    evolve!(sampler.regular_sampler, log_target, a)
 
     ref_x = collect(range(xlims...; length=501))
     ref_y = similar(ref_x)
@@ -79,7 +47,7 @@ function demo!(
 
     CairoMakie.empty!(fig)
     axis = @inbounds CairoMakie.Axis(fig[1,1])
-    CairoMakie.hist!(axis, view(view(chain, 1, :, :), :);
+    CairoMakie.hist!(axis, view(view(sampler.regular_sampler.chain, 1, :, :), :);
                      bins=100, normalization=:pdf, color=(:gray, 0.3), strokewidth=0.5)
     CairoMakie.lines!(axis, ref_x, ref_y, linewidth=3.0)
     return fig

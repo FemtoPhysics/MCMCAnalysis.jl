@@ -5,7 +5,7 @@ const MatI = AbstractMatrix
 
 abstract type AbstractMCMCStrategy end
 
-mutable struct NoBurnInStrategy <: AbstractMCMCStrategy
+struct NoBurnInStrategy <: AbstractMCMCStrategy
     gen_num::UInt64  # num. of sampling generation
     param_a::Float64 # param. a of z ~ g(z) ∝ 1/√a, a ∈ [a⁻¹, a]
 
@@ -13,7 +13,7 @@ mutable struct NoBurnInStrategy <: AbstractMCMCStrategy
     NoBurnInStrategy(n::Integer, a::Real) = new(n, a)
 end
 
-mutable struct BurnInStrategy <: AbstractMCMCStrategy
+struct BurnInStrategy <: AbstractMCMCStrategy
     gen_num::UInt64  # num. of sampling generation
     burn_in::UInt64  # num. of burn-in discarding stage
     param_a::Float64 # param. a of z ~ g(z) ∝ 1/√a, a ∈ [a⁻¹, a]
@@ -83,13 +83,15 @@ function initialize!(des::MatI, lb::NTuple{N,L}, ub::NTuple{N,U}) where {N,L<:Re
     return nothing
 end
 
-@inline burn_in_init!(s::MCMCSampler{NoBurnInStrategy, NoBurnInSampler}, lb::L,         ub::U)         where {L,U} = nothing
-@inline burn_in_init!(s::MCMCSampler{BurnInStrategy,   BurnInSampler},   lb::NTuple{N}, ub::NTuple{N}) where N     =
+# type-stability ✓
+@inline burn_in_init!(s::MCMCSampler{NoBurnInStrategy, NoBurnInSampler}, lb::L, ub::U) where {L,U} = nothing
+@inline burn_in_init!(s::MCMCSampler{BurnInStrategy,   BurnInSampler},   lb::NTuple{N}, ub::NTuple{N}) where N =
     initialize!(view(s.burn_in_sampler.chain, :, :, 1), lb, ub)
 
-@inline regular_init!(s::MCMCSampler{NoBurnInStrategy, NoBurnInSampler}, lb::L,         ub::U)         where {L,U} =
+# type-stability ✓
+@inline regular_init!(s::MCMCSampler{NoBurnInStrategy, NoBurnInSampler}, log_target::F, n::I, one2K::O, lb::NTuple{N}, ub::NTuple{N}) where {F,I,O,N} =
     initialize!(view(s.regular_sampler.chain, :, :, 1), lb, ub)
-@inline regular_init!(s::MCMCSampler{BurnInStrategy,   BurnInSampler},   lb::NTuple{N}, ub::NTuple{N}) where N     = 
+@inline regular_init!(s::MCMCSampler{BurnInStrategy,   BurnInSampler},   log_target::Function, n::Int, one2K::Base.OneTo, lb::L, ub::U) where {L,U} = 
     evolve!(view(s.regular_sampler.chain, :, :, 1), view(s.burn_in_sampler.chain, :, :, s.strategy.burn_in), log_target, n, one2K, s.strategy.param_a)
 
 # = = = = = = = = = = = = = = = = = = = = = #
@@ -142,6 +144,17 @@ function evolve!(walkers_new::MatI, walkers_old::MatI, log_target::Function, n::
         if log(rand()) > q
             copyto!(walker_new, walker_old)
         end
+    end
+    return nothing
+end
+
+# type-stability ✓
+function evolve!(s::AbstractMCMCSampler, log_target::Function, a::Real)
+    chain = s.chain
+    param_dim, epoch_num = size(chain, 1), size(chain, 3)
+    one2K = axes(chain, 2)
+    for t in 2:epoch_num
+        evolve!(view(chain,:,:,t), view(chain,:,:,t-1), log_target, param_dim, one2K, a)
     end
     return nothing
 end
