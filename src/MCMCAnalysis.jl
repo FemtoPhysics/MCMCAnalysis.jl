@@ -20,7 +20,7 @@ mutable struct BurnInStrategy <: AbstractMCMCStrategy
 
     BurnInStrategy(n::Integer, b::Integer) = new(n, b, 2.0)
     function BurnInStrategy(n::Integer, b::Integer, a::Real)
-        b > 0 || error("BurnInStrategy: num. of burn-in is zero ($b).")
+        b > 0 || error("BurnInStrategy: num. of burn-in is zero.")
         return new(n, b, a)
     end
 end
@@ -31,14 +31,14 @@ abstract type AbstractBurnInSampler <: AbstractMCMCSampler end
 struct NoBurnInSampler <: AbstractBurnInSampler end
 const NoBurnIn = NoBurnInSampler()
 
-struct BurnInSampler <: AbstractBurnInSampler
-    chain::Array{Float64,3}
-    log_target::Array{Float64,2}
-end
+# type-stability ✓
+for (c, p) in zip((:BurnInSampler, :RegularSampler), (:AbstractBurnInSampler, :AbstractMCMCSampler))
+    @eval struct $c <: $p
+        chain::Array{Float64,3}
+        log_target::Array{Float64,2}
 
-struct RegularSampler <: AbstractMCMCSampler
-    chain::Array{Float64,3}
-    log_target::Array{Float64,2}
+        $c(n::Integer, K::Integer, N::Integer) = new(Array{Float64,3}(undef, n, K, N), Array{Float64,2}(undef, K, N))
+    end
 end
 
 struct MCMCSampler{
@@ -57,26 +57,16 @@ struct MCMCSampler{
     ) where {
         SType <: AbstractMCMCStrategy,
         BType <: AbstractBurnInSampler
-    } = new{SType, BType}(strategy, burn_in_sampler, regular_sampler)
+    } = new{SType,BType}(strategy, burn_in_sampler, regular_sampler)
 
     # type-stability ✓
-    @generated function MCMCSampler(strategy::T, n::Int, K::Int) where T
+    @generated function MCMCSampler(strategy::T, n::Int, K::Int) where T<:AbstractMCMCStrategy
         if T ≡ NoBurnInStrategy
             ex = :NoBurnIn
         elseif T ≡ BurnInStrategy
-            ex = :(
-                BurnInSampler(
-                    Array{Float64,3}(undef, n, K, strategy.burn_in),
-                    Array{Float64,2}(undef, K, strategy.burn_in)
-                )
-            )
+            ex = :(BurnInSampler(n, K, strategy.burn_in))
         end
-        return :(MCMCSampler(
-            strategy, $ex, RegularSampler(
-                Array{Float64,3}(undef, n, K, strategy.gen_num),
-                Array{Float64,2}(undef, K, strategy.gen_num)
-            )
-        ))
+        return :(MCMCSampler(strategy, $ex, RegularSampler(n, K, strategy.gen_num)))
     end
 end
 
@@ -93,21 +83,14 @@ function initialize!(des::MatI, lb::NTuple{N,L}, ub::NTuple{N,U}) where {N,L<:Re
     return nothing
 end
 
-function initialize!(des::MatI, src::MatI)
-    @simd for i in eachindex(des)
-        @inbounds des[i] = src[i]
-    end
-    return nothing
-end
-
-burn_in_init!(s::MCMCSampler{NoBurnInStrategy, NoBurnInSampler}, lb::L,         ub::U)         where {L,U} = nothing
-burn_in_init!(s::MCMCSampler{BurnInStrategy,   BurnInSampler},   lb::NTuple{N}, ub::NTuple{N}) where N     =
+@inline burn_in_init!(s::MCMCSampler{NoBurnInStrategy, NoBurnInSampler}, lb::L,         ub::U)         where {L,U} = nothing
+@inline burn_in_init!(s::MCMCSampler{BurnInStrategy,   BurnInSampler},   lb::NTuple{N}, ub::NTuple{N}) where N     =
     initialize!(view(s.burn_in_sampler.chain, :, :, 1), lb, ub)
 
-regular_init!(s::MCMCSampler{NoBurnInStrategy, NoBurnInSampler}, lb::L,         ub::U)         where {L,U} =
+@inline regular_init!(s::MCMCSampler{NoBurnInStrategy, NoBurnInSampler}, lb::L,         ub::U)         where {L,U} =
     initialize!(view(s.regular_sampler.chain, :, :, 1), lb, ub)
-regular_init!(s::MCMCSampler{BurnInStrategy,   BurnInSampler},   lb::NTuple{N}, ub::NTuple{N}) where N     =
-    initialize!(view(s.regular_sampler.chain, :, :, 1), view(s.burn_in_sampler.chain, :, :, s.strategy.burn_in))
+@inline regular_init!(s::MCMCSampler{BurnInStrategy,   BurnInSampler},   lb::NTuple{N}, ub::NTuple{N}) where N     = 
+    evolve!(view(s.regular_sampler.chain, :, :, 1), view(s.burn_in_sampler.chain, :, :, s.strategy.burn_in), log_target, n, one2K, s.strategy.param_a)
 
 # = = = = = = = = = = = = = = = = = = = = = #
 # Subroutine: sampling                      #
@@ -123,8 +106,8 @@ function sampling(iter::AbstractUnitRange{T}, exc::T) where T
 end
 
 # sampling of z ~ g(z) ∝ 1/√a, a ∈ [a⁻¹, a]
-sampling(a::Real)          = sampling(a, rand())
-sampling(a::Real, u::Real) = a * u * u - 2 * u * (u - 1) + abs2(u - 1) / a
+@inline sampling(a::Real)          = sampling(a, rand())
+@inline sampling(a::Real, u::Real) = a * u * u - 2 * u * (u - 1) + abs2(u - 1) / a
 
 # walker_new := the k-th walker's new vector
 # walker_ole := the k-th walker's old vector
@@ -139,7 +122,7 @@ function stretch_move!(walker_new::VecI, walker_old::VecI, walker_com::VecI, a::
 end
 
 # type-stability ✓
-function log_accept_probability(log_target::Function, walker_new::VecI, walker_old::VecI, n::Int, z::Real)
+@inline function log_accept_probability(log_target::Function, walker_new::VecI, walker_old::VecI, n::Int, z::Real)
     return (n - 1) * log(z) + log_target(walker_new) - log_target(walker_old)
 end
 
