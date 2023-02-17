@@ -30,14 +30,13 @@ function demo!(
     N < 2 && error("num. of epoch ($N) should be at least 2")
 
     lb, ub = (min(init_range...),), (max(init_range...),)
-    sampler = MCMCSampler(BurnInStrategy(N, burn_in_num, a), n, K)
-    one2K = eachindex(1:K)
+    handler = MCMCHandler(BurnInStrategy(n, K, N, burn_in_num, a))
 
-    burn_in_init!(sampler, lb, ub)
-    evolve!(sampler.burn_in_sampler, log_target, a)
+    burn_in_init!(handler, lb, ub)
+    evolve!(handler.burn_in_sampler, handler.strategy, log_target)
 
-    regular_init!(sampler, log_target, n, one2K, lb, ub)
-    evolve!(sampler.regular_sampler, log_target, a)
+    regular_init!(handler, log_target, lb, ub)
+    evolve!(handler.regular_sampler, handler.strategy, log_target)
 
     ref_x = collect(range(xlims...; length=501))
     ref_y = similar(ref_x)
@@ -47,7 +46,7 @@ function demo!(
 
     CairoMakie.empty!(fig)
     axis = @inbounds CairoMakie.Axis(fig[1,1])
-    CairoMakie.hist!(axis, view(view(sampler.regular_sampler.chain, 1, :, :), :);
+    CairoMakie.hist!(axis, view(view(handler.regular_sampler.chain, 1, :, :), :);
                      bins=100, normalization=:pdf, color=(:gray, 0.3), strokewidth=0.5)
     CairoMakie.lines!(axis, ref_x, ref_y, linewidth=3.0)
     return fig
