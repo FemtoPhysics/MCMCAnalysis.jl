@@ -147,7 +147,7 @@ end
 
 # type-stability ✓
 function evolve!(walkers_new::MatI, walkers_old::MatI, log_target::Function, n::Int, one2K::Base.OneTo{Int}, a::Real)
-    for k in one2K
+    Threads.@threads for k in one2K
         walker_old = view(walkers_old, :, k)
         walker_new = view(walkers_new, :, k)
         j = sampling(one2K, k)
@@ -162,20 +162,18 @@ function evolve!(walkers_new::MatI, walkers_old::MatI, log_target::Function, n::
 end
 
 # type-stability ✓
-function evolve!(sa::S, st::AbstractMCMCStrategy, log_target::Function) where S<:AbstractMCMCSampler
-    chain = sa.chain
-    param_dims = st.param_dims
-    if S ≡ BurnInSampler
-        epoch_nums = st.burn_in
-    elseif S ≡ RegularSampler
-        epoch_nums = st.gen_num
+for (S, e) in zip((:BurnInSampler, :RegularSampler), (:burn_in, :gen_num))
+    @eval function evolve!(sa::$S, st::AbstractMCMCStrategy, log_target::Function)
+        chain = sa.chain
+        param_dims = st.param_dims
+        epoch_nums = st.$e
+        param_a = st.param_a
+        one2K = axes(chain, 2)
+        for t in 2:epoch_nums
+            evolve!(view(chain,:,:,t), view(chain,:,:,t-1), log_target, param_dims, one2K, param_a)
+        end
+        return nothing
     end
-    param_a = st.param_a
-    one2K = axes(chain, 2)
-    for t in 2:epoch_nums
-        evolve!(view(chain,:,:,t), view(chain,:,:,t-1), log_target, param_dims, one2K, param_a)
-    end
-    return nothing
 end
 
 end # module MCMCAnalysis
